@@ -161,6 +161,25 @@ class Data(unittest.TestCase):
             self.assertIn("not financial advice", text)
 
 
+class Cross(unittest.TestCase):
+    def test_golden_cross_enters_next_open_and_exits_on_death_cross(self):
+        day = datetime.datetime(2026, 1, 5)
+        closes = [100] * 25 + [110, 120, 130, 130, 130] + [100, 90, 80, 80, 80]
+        bars = []
+        for k, c in enumerate(closes):
+            bars.append({"t": day + datetime.timedelta(days=k), "o": c, "h": c + 1, "l": c - 1, "c": c, "v": 1e6})
+        trades = idx.cross_backtest(bars, 5, 20, fee_buy=0, fee_sell=0)
+        self.assertEqual(len(trades), 1)
+        t = trades[0]
+        self.assertEqual(t["signal"], bars[25]["t"].strftime("%Y-%m-%d"))     # first close with MA5 > MA20
+        self.assertEqual(t["entry"], 120)                                    # the next day's open
+        self.assertEqual(t["why"], "death cross")
+        self.assertLess(t["ret"], 0)
+        self.assertEqual(idx.cross_backtest(bars, 5, 20, start="2027-01-01"), [])
+        s = idx.cross_stats(trades)
+        self.assertEqual((s["n"], s["wins"]), (1, 0))
+
+
 class ORB(unittest.TestCase):
     def test_orb_on_wib_sessions(self):
         day = datetime.datetime(2026, 10, 5, 9, 0)   # a Monday

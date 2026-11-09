@@ -7,6 +7,7 @@
     python3 idx.py backtest DOOH --strategy breakout --target-r 2 --hold 10
     python3 idx.py backtest DOOH --csv data/DOOH.csv    # data sendiri: Date,Open,High,Low,Close,Volume
     python3 idx.py orb DOOH                             # opening range breakout intraday, 5 menit, 60 hari
+    python3 idx.py cross BBRI --fast 5 --slow 20 --from 2026-01-01   # golden cross, keluar di death cross
     python3 idx.py scan DOOH BBCA TLKM GOTO             # semua strategi, semua saham, urut expectancy
 
 The IDX rules it applies (defaults, check them against idx.co.id, they change):
@@ -641,6 +642,99 @@ def cmd_orb(a):
     return 0
 
 
+def cross_backtest(bars, fast=5, slow=20, start=None, fee_buy=None, fee_sell=None, arb=None, arb_tiered=None):
+    """Golden cross: buy at the next open after MA(fast) closes above MA(slow), sell at the
+    next open after the death cross (MA(fast) closes back below). Returns in percent, net of fees.
+    start (YYYY-MM-DD): only signals on or after it count; earlier bars still warm up the MAs."""
+    fee_buy = DEFAULTS["fee_buy"] if fee_buy is None else fee_buy
+    fee_sell = DEFAULTS["fee_sell"] if fee_sell is None else fee_sell
+    closes = [b["c"] for b in bars]
+    trades, i, n = [], slow, len(bars)
+    while i < n - 1:
+        f0, s0 = sma(closes, fast, i - 1), sma(closes, slow, i - 1)
+        f1, s1 = sma(closes, fast, i), sma(closes, slow, i)
+        day = bars[i]["t"].strftime("%Y-%m-%d")
+        if None in (f0, s0, f1, s1) or not (f0 <= s0 and f1 > s1) or (start and day < start):
+            i += 1
+            continue
+        e = bars[i + 1]
+        up, _ = limits(bars[i]["c"], arb, arb_tiered)
+        if e["v"] <= 0 or (locked(e) and e["o"] >= up):
+            i += 1
+            continue
+        entry, k, exit_, why, xk = e["o"], i + 1, None, None, None
+        while k < n - 1:
+            if sma(closes, fast, k) < sma(closes, slow, k):  # death cross on day k's close
+                j = k + 1
+                while j < n - 1 and locked(bars[j]) and bars[j]["l"] <= limits(bars[j - 1]["c"], arb, arb_tiered)[1]:
+                    j += 1  # locked at ARB: cannot sell yet
+                exit_, why, xk = bars[j]["o"], "death cross", j
+                break
+            k += 1
+        if exit_ is None:
+            xk = n - 1
+            exit_, why = bars[xk]["c"], "terbuka"
+        ret = 100.0 * (exit_ * (1 - fee_sell / 100.0) - entry * (1 + fee_buy / 100.0)) / (entry * (1 + fee_buy / 100.0))
+        trades.append({"signal": day, "entry_date": e["t"].strftime("%Y-%m-%d"), "entry": entry,
+                       "exit_date": bars[xk]["t"].strftime("%Y-%m-%d"), "exit": exit_, "why": why,
+                       "days": xk - (i + 1) + 1, "ret": round(ret, 3)})
+        i = xk  # next signal can come after the exit
+    return trades
+
+
+def cross_stats(trades):
+    n = len(trades)
+    rets = [t["ret"] for t in trades]
+    closed = [t for t in trades if t["why"] != "terbuka"]
+    wins = [r for r in rets if r > 0]
+    losses = [r for r in rets if r <= 0]
+    total = 1.0
+    for r in rets:
+        total *= 1 + r / 100.0
+    return {"n": n, "closed": len(closed), "wins": len(wins),
+            "win_rate": 100.0 * len(wins) / n if n else 0.0,
+            "avg_ret": sum(rets) / n if n else 0.0,
+            "avg_win": sum(wins) / len(wins) if wins else 0.0,
+            "avg_loss": sum(losses) / len(losses) if losses else 0.0,
+            "compound": 100.0 * (total - 1), "best": max(rets) if rets else 0.0,
+            "worst": min(rets) if rets else 0.0}
+
+
+def cmd_cross(a):
+    bars, src = daily_bars(a)
+    if len(bars) < a.slow + 2:
+        raise IDXError("hanya %d hari data" % len(bars))
+    trades = cross_backtest(bars, a.fast, a.slow, a.start, a.fee_buy, a.fee_sell, a.arb, a.arb_tiered)
+    s = cross_stats(trades)
+    held = [b for b in bars if not a.start or b["t"].strftime("%Y-%m-%d") >= a.start]
+    bh = None
+    if len(held) > 1:
+        bh = 100.0 * (held[-1]["c"] / held[0]["o"] - 1)
+    if a.json:
+        print(json.dumps({"code": a.code.upper(), "source": src, "fast": a.fast, "slow": a.slow,
+                          "start": a.start, "stats": s, "buy_and_hold": bh, "trades": trades}, indent=2))
+        return 0
+    print("%s golden cross MA%d / MA%d, sinyal sejak %s, data sampai %s (%s)." % (
+        a.code.upper(), a.fast, a.slow, a.start or bars[a.slow]["t"].strftime("%Y-%m-%d"),
+        bars[-1]["t"].strftime("%Y-%m-%d"), src))
+    print("Beli di open setelah MA%d tutup di atas MA%d, jual di open setelah death cross. "
+          "Fee beli %.2f %%, jual %.2f %%." % (a.fast, a.slow, a.fee_buy, a.fee_sell))
+    for t in trades:
+        print("  %s beli %s -> %s %s %s (%d hari) %+.2f %%" % (
+            t["entry_date"], px(t["entry"]), t["exit_date"], px(t["exit"]), t["why"], t["days"], t["ret"]))
+    print("%d trade (%d sudah ditutup), menang %d: win rate %.1f %%." % (s["n"], s["closed"], s["wins"], s["win_rate"]))
+    if s["n"]:
+        print("Rata-rata %+.2f %% per trade (menang %+.2f %%, kalah %+.2f %%), terbaik %+.2f %%, terburuk %+.2f %%." % (
+            s["avg_ret"], s["avg_win"], s["avg_loss"], s["best"], s["worst"]))
+        print("Total bila diulang terus (compounding): %+.2f %%." % s["compound"])
+    if bh is not None:
+        print("Pembanding, beli dan tahan di periode yang sama: %+.2f %% (sebelum fee)." % bh)
+    if s["n"] < 30:
+        print("Sampel kecil (%d trade): win rate ini belum bisa dijadikan pegangan." % s["n"])
+    print("Ini data masa lalu, bukan prediksi. Bukan saran investasi (not financial advice).")
+    return 0
+
+
 def cmd_scan(a):
     if a.csv or a.offline:
         raise IDXError("scan membaca Yahoo untuk tiap kode; untuk satu file pakai `backtest --csv`")
@@ -724,6 +818,13 @@ def main(argv=None):
     p.add_argument("--trades", action="store_true")
     fees(p)
 
+    p = sub.add_parser("cross", help="golden cross MA cepat / MA lambat, keluar di death cross")
+    p.add_argument("code")
+    p.add_argument("--fast", type=int, default=5)
+    p.add_argument("--slow", type=int, default=20)
+    p.add_argument("--from", dest="start", help="hanya sinyal sejak tanggal ini, YYYY-MM-DD")
+    data(p)
+
     p = sub.add_parser("scan", help="semua strategi untuk beberapa saham")
     p.add_argument("codes", nargs="+")
     data(p)
@@ -734,7 +835,7 @@ def main(argv=None):
         return 2
     try:
         return {"rules": cmd_rules, "size": cmd_size, "backtest": cmd_backtest,
-                "orb": cmd_orb, "scan": cmd_scan}[a.cmd](a)
+                "orb": cmd_orb, "cross": cmd_cross, "scan": cmd_scan}[a.cmd](a)
     except IDXError as e:
         print("trader-idx: %s" % e, file=sys.stderr)
         return 1

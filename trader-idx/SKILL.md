@@ -35,6 +35,7 @@ python3 "${CLAUDE_SKILL_DIR}/idx.py" backtest DOOH                          # 4 
 python3 "${CLAUDE_SKILL_DIR}/idx.py" backtest DOOH --strategy breakout --target-r 2 --trades
 python3 "${CLAUDE_SKILL_DIR}/idx.py" backtest DOOH --csv DOOH.csv           # data sendiri
 python3 "${CLAUDE_SKILL_DIR}/idx.py" orb DOOH                               # ORB intraday 5 menit, 60 hari
+python3 "${CLAUDE_SKILL_DIR}/idx.py" cross BBRI --fast 5 --slow 20 --from 2026-01-01   # golden cross
 python3 "${CLAUDE_SKILL_DIR}/idx.py" scan DOOH BBCA TLKM GOTO               # semua strategi, urut expectancy
 ```
 
@@ -84,6 +85,12 @@ pemantauan khusus (full call auction) punya aturan lain dan tidak dimodelkan.
 | `rsi2` | RSI(2) < 10 saat harga di atas MA50 (koreksi dalam tren naik) |
 | `volspike` | volume > 3 x rata-rata, naik dari kemarin, tutup di 25 % teratas range hari itu |
 | `orb` | (intraday) close 5 menit pertama di atas range 15 menit pertama sesi 1, stop di low range (`--stop-rule mid` untuk tengah), keluar di target, stop, atau bar terakhir sebelum 15:50 |
+
+**Golden cross** (`cross`): beli di open setelah MA cepat tutup di atas MA
+lambat, jual di open setelah death cross (MA cepat tutup kembali di bawah).
+Tanpa stop dan target tetap, jadi hasilnya dalam persen bersih fee, bukan R,
+dengan pembanding beli dan tahan di periode yang sama. `--from` membatasi
+sinyal ke tanggal itu, data sebelumnya tetap dipakai untuk menghitung MA.
 
 **Verdict**: di bawah 30 trade "Sampel terlalu sedikit". Rata-rata R >= +0,10
 dan profit factor >= 1,2: "Ada edge historis". Rata-rata R <= -0,10:
