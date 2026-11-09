@@ -1,6 +1,6 @@
 # The Day Trader skill
 
-11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.
+12 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, replay every outcome before you risk a dollar, and trade Indonesian (IDX) stocks by their own rules.
 
 Free, MIT, no signup, no API key. The tools are plain Python that read free
 public data: Yahoo Finance charts, Nasdaq Trader's symbol lists, SEC EDGAR
@@ -57,7 +57,7 @@ The tools need Python 3.8 or newer. Nothing to pip install. The SEC tools
 email in `trader/config.json` (`"sec_user_agent": "Your Name you@example.com"`)
 or in the `SEC_USER_AGENT` environment variable.
 
-## The eleven
+## The twelve
 
 | command | job | what it does |
 | --- | --- | --- |
@@ -72,6 +72,7 @@ or in the `SEC_USER_AGENT` environment variable.
 | `/trader-alerts` | Price Alerts | Rings when a price, a stop or the opening bell hits. |
 | `/trader-analyst` | Earnings Analyst | Reads earnings reports and sums up what changed. |
 | `/trader-pelosi` | Pelosi Tracker | Reads Congress's stock-trade disclosures the minute they are filed. |
+| `/trader-idx` | Saham Indonesia | IDX rules (fraksi, ARA / ARB, lots, fees, WIB sessions), lot sizing, and backtests of five strategies on any .JK stock. |
 
 ## How to use it
 
@@ -141,6 +142,10 @@ python3 trader-alerts/alerts.py add --from-plan                        # stop, t
 python3 trader-alerts/alerts.py check                                  # rings what hit, once
 python3 trader-analyst/facts.py TSLA                                   # quarters, growth, EPS
 python3 trader-pelosi/ptr.py index --member pelosi                     # her PTRs this year
+python3 trader-idx/idx.py rules 122 --prev 118                         # IDX tick, ARA / ARB, 1 lot
+python3 trader-idx/idx.py size --modal 10000000 --entry 122 --stop 114 # lots from modal and risk
+python3 trader-idx/idx.py backtest DOOH                                # 4 daily strategies on DOOH.JK
+python3 trader-idx/idx.py orb DOOH                                     # intraday ORB, WIB sessions
 ```
 
 ```bash
@@ -150,7 +155,29 @@ python3 -m unittest discover -s tests -v
 The tests run offline, on fixtures cut from real data: TSLA's 5-minute bars
 for the 60 days to October 19 2026, the 10:15 AM opening-range scan, Yahoo's
 TSLA headlines that morning, the House Clerk's 2026 index, real PTR text and
-real XBRL facts. They reproduce every number in the example above.
+real XBRL facts. They reproduce every number in the example above. The IDX
+tests use a seeded synthetic random walk on the tick grid, not real prices.
+
+## Saham Indonesia
+
+`/trader-idx` is the pack's Indonesian side. The other skills assume the US
+market: one share at a time, 9:30 to 4:00 New York, no daily price limit.
+The Indonesia Stock Exchange works differently, and the tool applies it:
+
+- **Fraksi harga**: prices move in ticks of 1, 2, 5, 10 or 25 rupiah by price band.
+- **ARA / ARB**: daily limits from the previous close (35 / 25 / 20 % up,
+  15 % down by default). A stock locked at ARB cannot be sold, and the
+  backtest waits for the next day instead of pretending the stop filled.
+- **Lots**: 1 lot = 100 shares, sizing is in lots.
+- **Fees**: 0.15 % buy, 0.25 % sell (with the 0.1 % sales tax), in every R.
+- **Sessions (WIB)**: 09:00 to 12:00 and 13:30 to 15:50, Friday 09:00 to 11:30
+  and 14:00 to 15:50.
+
+Ask "metode apa yang win rate-nya tinggi untuk DOOH" and it backtests
+breakout, pullback, RSI(2), volume-spike and the intraday opening range
+breakout on DOOH.JK, after fees, and says plainly when the sample is too
+small or the edge is not there. Check the rules against idx.co.id and your
+broker's fees: they change, and every one is a flag.
 
 ## Fine print
 
