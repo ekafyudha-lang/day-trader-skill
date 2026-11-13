@@ -120,6 +120,27 @@ An example, the trade in the reel: Tesla, Monday October 19 2026, real data.
 9. **`/trader-alerts`** rings on the stop, the target and at 3:55 PM to
    flatten whatever is still open.
 
+## Bonus: the First Candle bot
+
+`/trader-firstcandle` trades one rule, once a day: the first 5-minute candle
+after the 9:30 open. Mark its high and low; on 1-minute candles wait for a
+close outside the range that leaves a fair value gap; wait for price to come
+back inside; enter when a later candle closes outside again on the gap's side
+(the double break). Stop at the candle that first broke the range, target 1:4.
+
+```bash
+python3 trader-firstcandle/firstcandle.py check SPY --write            # today -> trader/plan.json
+python3 trader-firstcandle/firstcandle.py watch SPY QQQ --until 11:30  # minute by minute
+python3 trader-firstcandle/firstcandle.py backtest SPY QQQ TSLA        # ~30 days of 1-minute candles
+```
+
+A long entry writes `trader/plan.json` in the Exit Planner's shape, so the
+budget, risk and broker skills pick it up from there. Shorts are reported,
+not sized: the pack trades longs only. On the repo's TSLA 5-minute fixture
+(`backtest TSLA --interval 5m`) it took 36 trades in 59 sessions: 4 targets,
+22 stops, 10 flat, -5.64R in all. Test it on your own tickers before you
+trust it.
+
 ## The tools
 
 All standard-library Python. The data tools read public endpoints and are
